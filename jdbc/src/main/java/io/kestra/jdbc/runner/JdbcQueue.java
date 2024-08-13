@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.CaseFormat;
 import io.kestra.core.exceptions.DeserializationException;
+import io.kestra.core.models.executions.Execution;
 import io.kestra.core.queues.QueueException;
 import io.kestra.core.queues.QueueInterface;
 import io.kestra.core.queues.QueueService;
@@ -13,6 +14,7 @@ import io.kestra.core.utils.IdUtils;
 import io.kestra.jdbc.JdbcTableConfigs;
 import io.kestra.jdbc.JdbcMapper;
 import io.kestra.jdbc.JooqDSLContextWrapper;
+import io.kestra.core.queues.MessageTooBigException;
 import io.kestra.jdbc.repository.AbstractJdbcRepository;
 import io.micronaut.context.ApplicationContext;
 import io.micronaut.context.annotation.ConfigurationProperties;
@@ -57,6 +59,8 @@ public abstract class JdbcQueue<T> implements QueueInterface<T> {
 
     protected final Configuration configuration;
 
+    protected final MessageProtectionConfiguration messageProtectionConfiguration;
+
     protected final Table<Record> table;
 
     protected final JdbcQueueIndexer jdbcQueueIndexer;
@@ -71,6 +75,7 @@ public abstract class JdbcQueue<T> implements QueueInterface<T> {
         this.cls = cls;
         this.dslContextWrapper = applicationContext.getBean(JooqDSLContextWrapper.class);
         this.configuration = applicationContext.getBean(Configuration.class);
+        this.messageProtectionConfiguration = applicationContext.getBean(MessageProtectionConfiguration.class);
 
         JdbcTableConfigs jdbcTableConfigs = applicationContext.getBean(JdbcTableConfigs.class);
 
@@ -81,10 +86,19 @@ public abstract class JdbcQueue<T> implements QueueInterface<T> {
 
     @SneakyThrows
     protected Map<Field<Object>, Object> produceFields(String consumerGroup, String key, T message) {
+        byte[] bytes = MAPPER.writeValueAsBytes(message);
+        if (messageProtectionConfiguration.enabled && bytes.length >= messageProtectionConfiguration.limit) {
+            // we let terminated execution messages to go through anyway
+            if (!(message instanceof Execution execution) || !execution.getState().isTerminated()) {
+                    throw new MessageTooBigException("Message of size " + bytes.length + " exceed the configured limit of " + messageProtectionConfiguration.limit);
+            }
+        }
+
+
         Map<Field<Object>, Object> fields = new HashMap<>();
         fields.put(AbstractJdbcRepository.field("type"), this.cls.getName());
         fields.put(AbstractJdbcRepository.field("key"), key != null ? key : IdUtils.create());
-        fields.put(AbstractJdbcRepository.field("value"), JSONB.valueOf(MAPPER.writeValueAsString(message)));
+        fields.put(AbstractJdbcRepository.field("value"), JSONB.valueOf(new String(bytes)));
 
         if (consumerGroup != null) {
             fields.put(AbstractJdbcRepository.field("consumer_group"), consumerGroup);

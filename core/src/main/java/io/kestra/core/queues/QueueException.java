@@ -4,7 +4,11 @@ import java.io.Serial;
 
 public class QueueException extends RuntimeException {
     @Serial
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
+
+    public QueueException(String message) {
+        super(message);
+    }
 
     public QueueException(String message, Throwable e) {
         super(message, e);

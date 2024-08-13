@@ -3,6 +3,7 @@ package io.kestra.jdbc;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.ImmutableMap;
 import io.kestra.core.exceptions.DeserializationException;
+import io.kestra.core.exceptions.InternalException;
 import io.kestra.core.models.executions.metrics.MetricAggregation;
 import io.kestra.core.queues.QueueService;
 import io.kestra.core.repositories.ArrayListTotal;
@@ -71,7 +72,7 @@ public abstract class AbstractJdbcRepository<T> {
     @SneakyThrows
     public Map<Field<Object>, Object> persistFields(T entity) {
         return new HashMap<>(ImmutableMap
-            .of(io.kestra.jdbc.repository.AbstractJdbcRepository.field("value"), JdbcMapper.of().writeValueAsString(entity))
+            .of(io.kestra.jdbc.repository.AbstractJdbcRepository.field("value"), MAPPER.writeValueAsString(entity))
         );
     }
 

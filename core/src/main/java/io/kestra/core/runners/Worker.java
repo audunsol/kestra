@@ -13,10 +13,7 @@ import io.kestra.core.models.executions.*;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.Task;
 import io.kestra.core.models.triggers.*;
-import io.kestra.core.queues.QueueException;
-import io.kestra.core.queues.QueueFactoryInterface;
-import io.kestra.core.queues.QueueInterface;
-import io.kestra.core.queues.WorkerJobQueueInterface;
+import io.kestra.core.queues.*;
 import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.server.Metric;
 import io.kestra.core.server.ServerConfig;
@@ -598,18 +595,21 @@ public class Worker implements Service, Runnable, AutoCloseable {
         // emit
         finalWorkerTask = finalWorkerTask.withTaskRun(finalWorkerTask.getTaskRun().withState(state));
 
-        // if resulting object can't be emitted (mostly size of message), we just can't emit it like that.
-        // So we just tried to fail the status of the worker task, in this case, no log can't be added, just
-        // changing status must work in order to finish current task (except if we are near the upper bound size).
         try {
             WorkerTaskResult workerTaskResult = new WorkerTaskResult(finalWorkerTask, dynamicWorkerResults);
             this.workerTaskResultQueue.emit(workerTaskResult);
             return workerTaskResult;
         } catch (QueueException e) {
+            // If there is a QueueException it can either be caused by the message limit or another queue issue.
+            // We fail the task and try to resend it.
             finalWorkerTask = workerTask.fail();
+            if (e instanceof MessageTooBigException) {
+                // If it's a message too big, we remove the outputs
+                finalWorkerTask = finalWorkerTask.withTaskRun(finalWorkerTask.getTaskRun().withOutputs(Collections.emptyMap()));
+            }
             WorkerTaskResult workerTaskResult = new WorkerTaskResult(finalWorkerTask, dynamicWorkerResults);
             RunContextLogger contextLogger = runContextLoggerFactory.create(workerTask.getTaskRun(), workerTask.getTask());
-            contextLogger.logger().error("Exception while trying to emit the worker task result to the queue", e);
+            contextLogger.logger().error("Unable to emit the worker task result to the queue: {}", e.getMessage(), e);
             this.workerTaskResultQueue.emit(workerTaskResult);
             return workerTaskResult;
         } finally {
